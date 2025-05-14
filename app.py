@@ -30,7 +30,9 @@ if uploaded_file:
         st.subheader("🔍 Preview of Uploaded Data")
         st.dataframe(df.head(10))
 
-        tab1, tab2, tab3 = st.tabs(["📈 Monitoring Dashboard", "🚨 Alerts", "📊 Statistics"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📈 Monitoring Dashboard", "🚨 Alerts", "📊 Statistics", "⏱️ Alert Timeline", "🛢️ Shaker Performance"
+        ])
 
         with tab1:
             st.markdown("### Real-Time Sensor Trends")
@@ -41,23 +43,23 @@ if uploaded_file:
         with tab2:
             st.markdown("### 🚨 Detected Alerts")
             alerts = []
+            alert_times = []
 
             df['ROP_change'] = df['Rate Of Penetration (ft_per_hr)'].pct_change().abs()
-            if df['ROP_change'].rolling('10min').mean().gt(0.5).any():
+            rop_alerts = df[df['ROP_change'].rolling('10min').mean().gt(0.5)]
+            if not rop_alerts.empty:
                 alerts.append("Significant ROP fluctuation (>50% in 10 min) detected.")
+                alert_times.append(rop_alerts.index[0])
 
             hl_issue = (df['Hook Load (klbs)'] > 60) &                        (df['Rate Of Penetration (ft_per_hr)'] < 1) &                        (df['Pump 1 strokes/min (SPM)'] == 0)
             if hl_issue.any():
                 alerts.append("High hook load while pumps are off and ROP is near zero. Possible stuck pipe.")
+                alert_times.append(df[hl_issue].index[0])
 
-            if df['DAS Vibe Lateral Max (g_force)'].gt(25).any():
+            vib_alert = df['DAS Vibe Lateral Max (g_force)'].gt(25)
+            if vib_alert.any():
                 alerts.append("Excessive lateral vibration detected (>25g).")
-
-            if df['AutoDriller Limiting (unitless)'].gt(0).any():
-                alerts.append("AutoDriller limiting detected.")
-
-            if df['DAS Vibe WOB Reduce (percent)'].gt(0).any() or df['DAS Vibe RPM Reduce (percent)'].gt(0).any():
-                alerts.append("DAS vibration mitigation active.")
+                alert_times.append(df[vib_alert].index[0])
 
             if alerts:
                 for alert in alerts:
@@ -69,6 +71,27 @@ if uploaded_file:
             st.markdown("### 📊 Statistical Summary")
             stats = df.describe().T[['mean', 'std', 'min', 'max']]
             st.dataframe(stats)
+
+        with tab4:
+            st.markdown("### ⏱️ Alert Timeline")
+            if alerts:
+                timeline_df = pd.DataFrame({'Alert': alerts, 'Time': alert_times})
+                st.dataframe(timeline_df)
+            else:
+                st.info("No alert timestamps available.")
+
+        with tab5:
+            st.markdown("### 🛢️ Shaker Performance (Mock Values)")
+            df['Mock Shaker Load %'] = (df['PLC ROP (ft_per_hr)'] * 2).clip(0, 100)
+            df['Mock Screen Occupancy'] = (df['DAS Vibe Lateral Max (g_force)'] * 3).clip(0, 100)
+            df['Mock Overload Risk'] = ((df['Mock Shaker Load %'] > 80) & (df['Mock Screen Occupancy'] > 70)).astype(int)
+
+            st.markdown("#### Shaker Load & Screen Status")
+            st.line_chart(df[['Mock Shaker Load %', 'Mock Screen Occupancy']])
+
+            st.markdown("#### Overload Risk (1 = Risk)")
+            fig = px.scatter(df.reset_index(), x='Timestamp', y='Mock Overload Risk', color='Mock Overload Risk')
+            st.plotly_chart(fig)
 
         st.sidebar.markdown("---")
         csv = df.to_csv().encode('utf-8')
